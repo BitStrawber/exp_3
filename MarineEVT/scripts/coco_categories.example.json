@@ -4,25 +4,29 @@
       "id": 1,
       "name": "fish",
       "prompt": "fish",
-      "supercategory": "marine animal"
+      "supercategory": "marine animal",
+      "min_score": 0.5
     },
     {
       "id": 2,
       "name": "shark",
       "prompt": "shark",
-      "supercategory": "marine animal"
+      "supercategory": "marine animal",
+      "min_score": 0.65
     },
     {
       "id": 3,
       "name": "sea turtle",
       "prompt": "sea turtle",
-      "supercategory": "marine animal"
+      "supercategory": "marine animal",
+      "min_score": 0.55
     },
     {
       "id": 4,
       "name": "diver",
       "prompt": "diver",
-      "supercategory": "person"
+      "supercategory": "person",
+      "min_score": 0.6
     }
   ]
 }
