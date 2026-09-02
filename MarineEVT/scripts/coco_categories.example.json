@@ -1,0 +1,28 @@
+{
+  "categories": [
+    {
+      "id": 1,
+      "name": "fish",
+      "prompt": "fish",
+      "supercategory": "marine animal"
+    },
+    {
+      "id": 2,
+      "name": "shark",
+      "prompt": "shark",
+      "supercategory": "marine animal"
+    },
+    {
+      "id": 3,
+      "name": "sea turtle",
+      "prompt": "sea turtle",
+      "supercategory": "marine animal"
+    },
+    {
+      "id": 4,
+      "name": "diver",
+      "prompt": "diver",
+      "supercategory": "person"
+    }
+  ]
+}
