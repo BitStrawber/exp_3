@@ -27,15 +27,29 @@ FastAPI、OpenCV、Pillow 和 pycocotools。不要为纯标注任务安装仓库
 
 ## 3. 下载 SAM3 权重
 
-先在 Hugging Face 获得 `facebook/sam3` 的访问权限：
+默认从 GitCode 的 `hf_mirrors/facebook/sam3` 镜像下载。权重由 Git LFS
+管理，先安装 Git LFS：
 
 ```bash
-conda activate marineevt-label
-hf auth login
-mkdir -p ~/xcx/models/sam3
-hf download facebook/sam3 sam3.pt config.json --local-dir ~/xcx/models/sam3
-sha256sum ~/xcx/models/sam3/sam3.pt
+sudo apt-get update
+sudo apt-get install -y git-lfs
+bash scripts/download_sam3_gitcode.sh ~/xcx/models/sam3
 ```
+
+脚本使用镜像地址
+`https://gitcode.com/hf_mirrors/facebook/sam3.git`，跳过仓库中的
+`model.safetensors`，只拉取本部署需要的 `sam3.pt`，并校验文件大小与
+SHA-256。下载完成后的默认路径为 `~/xcx/models/sam3/sam3.pt`。
+
+如需将模型放到大容量磁盘，直接把目标目录作为第一个参数：
+
+```bash
+bash scripts/download_sam3_gitcode.sh /data/fuping/marineevt/models/sam3
+```
+
+然后相应修改配置文件中的 `MODEL_ROOT` 或 `SAM3_CHECKPOINT_PATH`。首次使用
+前仍应阅读镜像仓库携带的 `LICENSE`，并遵守模型许可。8 个 Worker 共享磁盘
+上的同一份权重，不要分别下载 8 份。
 
 ## 4. 配置路径
 
