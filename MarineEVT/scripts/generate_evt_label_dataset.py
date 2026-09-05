@@ -57,6 +57,7 @@ class FrameItem:
     frame_index: int | None
     timestamp: float | None
     path: Path
+    categories: tuple[str, ...]
 
 
 def parse_args() -> argparse.Namespace:
@@ -71,6 +72,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--plan-file", type=Path, help="Reuse a previously generated segment_plans.jsonl.")
     parser.add_argument("--qwen-review", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--qwen-model", help="Local path or Hub id, e.g. Qwen/Qwen3-VL-8B-Instruct.")
+    parser.add_argument("--qwen-url", help="Persistent Qwen service endpoint, e.g. http://127.0.0.1:8100/v1/generate-json.")
+    parser.add_argument("--qwen-timeout", type=float, default=600.0)
     parser.add_argument("--qwen-device", default="cuda:0")
     parser.add_argument("--qwen-dtype", choices=("float16", "bfloat16", "float32"), default="float16")
     parser.add_argument("--qwen-max-new-tokens", type=int, default=1024)
@@ -121,8 +124,8 @@ def validate_args(args: argparse.Namespace) -> None:
     if args.qwen_min_pixels <= 0 or args.qwen_max_pixels < args.qwen_min_pixels:
         raise ValueError("Qwen pixel limits must be positive and max must be greater than or equal to min")
     if args.planner == "qwen" or args.qwen_review:
-        if not args.qwen_model:
-            raise ValueError("--qwen-model is required for Qwen planning or review")
+        if bool(args.qwen_model) == bool(args.qwen_url):
+            raise ValueError("Qwen planning/review requires exactly one of --qwen-model or --qwen-url")
     if args.require_vlm_accept and not args.qwen_review:
         raise ValueError("--require-vlm-accept requires --qwen-review")
 
@@ -187,9 +190,14 @@ class QwenAgent:
         self.processor = AutoProcessor.from_pretrained(
             model_path, trust_remote_code=True, min_pixels=min_pixels, max_pixels=max_pixels,
         )
-        self.model = AutoVisionModel.from_pretrained(
-            model_path, torch_dtype=dtype, trust_remote_code=True, low_cpu_mem_usage=True,
-        ).to(device).eval()
+        try:
+            self.model = AutoVisionModel.from_pretrained(
+                model_path, dtype=dtype, trust_remote_code=True, low_cpu_mem_usage=True,
+            ).to(device).eval()
+        except TypeError:
+            self.model = AutoVisionModel.from_pretrained(
+                model_path, torch_dtype=dtype, trust_remote_code=True, low_cpu_mem_usage=True,
+            ).to(device).eval()
         self.device = device
         self.max_new_tokens = max_new_tokens
 
@@ -208,18 +216,44 @@ class QwenAgent:
             raise ValueError("Qwen response is not a JSON object")
         return value
 
-    def generate_json(self, images: list[Any], instruction: str) -> dict[str, Any]:
+    def generate_json(self, image_paths: list[Path], instruction: str) -> dict[str, Any]:
         import torch
-        content = [{"type": "image", "image": image} for image in images]
-        content.append({"type": "text", "text": instruction})
-        messages = [{"role": "user", "content": content}]
-        prompt = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = self.processor(text=[prompt], images=images, padding=True, return_tensors="pt").to(self.device)
-        with torch.inference_mode():
-            generated = self.model.generate(**inputs, do_sample=False, max_new_tokens=self.max_new_tokens)
-        generated = generated[:, inputs.input_ids.shape[1]:]
-        text = self.processor.batch_decode(generated, skip_special_tokens=True)[0]
-        return self.parse_json(text)
+        from PIL import Image
+        images = []
+        try:
+            images = [Image.open(path).convert("RGB") for path in image_paths]
+            content = [{"type": "image", "image": image} for image in images]
+            content.append({"type": "text", "text": instruction})
+            messages = [{"role": "user", "content": content}]
+            prompt = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            inputs = self.processor(text=[prompt], images=images, padding=True, return_tensors="pt").to(self.device)
+            with torch.inference_mode():
+                generated = self.model.generate(**inputs, do_sample=False, max_new_tokens=self.max_new_tokens)
+            generated = generated[:, inputs.input_ids.shape[1]:]
+            text = self.processor.batch_decode(generated, skip_special_tokens=True)[0]
+            return self.parse_json(text)
+        finally:
+            for image in images:
+                image.close()
+
+
+class QwenHTTPAgent:
+    """Client for a persistent, same-host Qwen3-VL service."""
+
+    def __init__(self, endpoint: str, timeout: float):
+        self.endpoint = endpoint.rstrip("/")
+        self.timeout = timeout
+
+    def generate_json(self, image_paths: list[Path], instruction: str) -> dict[str, Any]:
+        response = http_json(
+            self.endpoint,
+            {"image_paths": [str(path.resolve()) for path in image_paths], "instruction": instruction},
+            self.timeout,
+        )
+        result = response.get("result", response)
+        if not isinstance(result, dict):
+            raise ValueError("Qwen service response is not a JSON object")
+        return result
 
 
 def write_jsonl(path: Path, values: Iterable[dict[str, Any]]) -> None:
@@ -261,9 +295,8 @@ def heuristic_segments(media: MediaInfo, categories: list[Category], args: argpa
 
 
 def qwen_segments(
-    media: MediaInfo, categories: list[Category], args: argparse.Namespace, agent: QwenAgent, work_dir: Path,
+    media: MediaInfo, categories: list[Category], args: argparse.Namespace, agent: Any, work_dir: Path,
 ) -> list[Segment]:
-    from PIL import Image
     samples = coarse_video_frames(media, work_dir / "planner_frames" / safe_name(media.path), args.planner_coarse_frames)
     if not samples:
         raise RuntimeError(f"Could not sample planner frames from {media.path}")
@@ -277,13 +310,7 @@ Prefer short high-value intervals, but preserve recall. Use higher sample_fps fo
 Only use allowed category names. Return JSON only with this schema:
 {{"segments":[{{"start":0.0,"end":5.0,"sample_fps":2.0,"categories":["fish"],"priority":"high"}}]}}
 Times must be seconds in [0,{media.duration or 0.0}]. Do not add commentary."""
-    images = []
-    try:
-        images = [Image.open(path).convert("RGB") for _, path in samples]
-        response = agent.generate_json(images, instruction)
-    finally:
-        for image in images:
-            image.close()
+    response = agent.generate_json([path for _, path in samples], instruction)
     raw_segments = response.get("segments")
     if not isinstance(raw_segments, list):
         raise ValueError("Qwen planner did not return a segments list")
@@ -307,7 +334,7 @@ Times must be seconds in [0,{media.duration or 0.0}]. Do not add commentary."""
 
 def build_plans(
     media_items: list[MediaInfo], categories: list[Category], args: argparse.Namespace,
-    agent: QwenAgent | None, work_dir: Path,
+    agent: Any | None, work_dir: Path,
 ) -> dict[str, list[Segment]]:
     if args.plan_file:
         rows = read_jsonl(args.plan_file)
@@ -344,12 +371,14 @@ def build_plans(
 
 
 def prepare_frames(
-    media_items: list[MediaInfo], plans: dict[str, list[Segment]], output: Path, args: argparse.Namespace,
+    media_items: list[MediaInfo], plans: dict[str, list[Segment]], categories: list[Category],
+    output: Path, args: argparse.Namespace,
 ) -> list[FrameItem]:
     from PIL import Image
     images_dir = output / "images" / "all"
     images_dir.mkdir(parents=True, exist_ok=True)
     result: list[FrameItem] = []
+    all_category_names = tuple(category.name for category in categories)
     for media in media_items:
         prefix = safe_name(media.path)
         if media.media_type == "image":
@@ -357,16 +386,20 @@ def prepare_frames(
             if not target.exists():
                 with Image.open(media.path) as image:
                     image.convert("RGB").save(target, quality=95)
-            result.append(FrameItem(media.source_key, str(media.path), "image", None, None, target.resolve()))
+            result.append(FrameItem(
+                media.source_key, str(media.path), "image", None, None,
+                target.resolve(), all_category_names,
+            ))
             continue
         import cv2
         capture = cv2.VideoCapture(str(media.path))
         fps = media.fps or 25.0
-        frame_indices: set[int] = set()
+        frame_categories: dict[int, set[str]] = {}
         for segment in plans.get(media.source_key, []):
             step = max(1, round(fps / segment.sample_fps))
-            frame_indices.update(range(round(segment.start * fps), round(segment.end * fps) + 1, step))
-        ordered = sorted(frame_indices)
+            for frame_index in range(round(segment.start * fps), round(segment.end * fps) + 1, step):
+                frame_categories.setdefault(frame_index, set()).update(segment.categories)
+        ordered = sorted(frame_categories)
         if args.max_frames_per_video:
             ordered = ordered[: args.max_frames_per_video]
         for frame_index in ordered:
@@ -379,6 +412,7 @@ def prepare_frames(
                     continue
             result.append(FrameItem(
                 media.source_key, str(media.path), "video", frame_index, frame_index / fps, target.resolve(),
+                tuple(sorted(frame_categories[frame_index])),
             ))
         capture.release()
     result.sort(key=lambda item: (item.source_key, item.frame_index if item.frame_index is not None else -1))
@@ -404,11 +438,15 @@ def annotate_one(
     from PIL import Image
     with Image.open(frame.path) as image:
         width, height = image.size
+    selected_names = set(frame.categories)
+    selected_categories = [category for category in categories if category.name in selected_names]
+    if not selected_categories:
+        raise ValueError(f"Frame has no allowed planned categories: {frame.path}")
     payload = {
         "image_path": str(frame.path),
         "prompts": [
             {"category_id": category.id, "text": prompt}
-            for category in categories for prompt in category.prompts
+            for category in selected_categories for prompt in category.prompts
         ],
         "ground_type": "all",
         "min_score": args.min_score,
@@ -427,6 +465,7 @@ def annotate_one(
         "media_type": frame.media_type,
         "frame_index": frame.frame_index,
         "timestamp": frame.timestamp,
+        "planned_categories": list(frame.categories),
         "image_path": str(frame.path),
         "width": width,
         "height": height,
@@ -470,10 +509,9 @@ def draw_numbered_candidates(record: dict[str, Any], target: Path) -> None:
 
 
 def qwen_review_records(
-    records: list[dict[str, Any]], categories: list[Category], agent: QwenAgent, work_dir: Path,
+    records: list[dict[str, Any]], categories: list[Category], agent: Any, work_dir: Path,
     *, model_name: str, resume: bool,
 ) -> None:
-    from PIL import Image
     category_map = {category.id: category.name for category in categories}
     progress_path = work_dir / "qwen_review_progress.jsonl"
     review_signature = hashlib.sha256(model_name.encode()).hexdigest()
@@ -512,8 +550,7 @@ Be conservative about rocks, coral, shadows, reflections and water artifacts. Re
 {{"decisions":[{{"candidate_id":0,"is_target":true,"confidence":0.9}}]}}
 Include every candidate exactly once. Do not add commentary."""
         try:
-            with Image.open(record["image_path"]) as original, Image.open(overlay) as marked:
-                response = agent.generate_json([original.convert("RGB"), marked.convert("RGB")], instruction)
+            response = agent.generate_json([Path(record["image_path"]), overlay], instruction)
         except Exception as error:
             LOGGER.warning("Qwen review failed for %s; sending candidates to REVIEW: %s", record["image_path"], error)
             for annotation in record["annotations"]:
@@ -648,13 +685,36 @@ def main() -> int:
             {**asdict(item), "path": str(item.path)} for item in media_items
         ])
 
-        agent = QwenAgent(
-            args.qwen_model, args.qwen_device, args.qwen_dtype, args.qwen_max_new_tokens,
-            args.qwen_min_pixels, args.qwen_max_pixels,
-        ) \
-            if args.planner == "qwen" or args.qwen_review else None
+        agent = None
+        qwen_identity = str(args.qwen_model or args.qwen_url)
+        qwen_service: dict[str, Any] | None = None
+        if args.planner == "qwen" or args.qwen_review:
+            if args.qwen_url:
+                normalized_qwen_url = args.qwen_url.rstrip("/")
+                qwen_health_url = (
+                    normalized_qwen_url[:-len("/v1/generate-json")] + "/health"
+                    if normalized_qwen_url.endswith("/v1/generate-json")
+                    else normalized_qwen_url + "/health"
+                )
+                health = http_json(qwen_health_url, None, min(30.0, args.qwen_timeout))
+                if health.get("status") != "ok" or not health.get("model_loaded"):
+                    raise RuntimeError(f"Qwen endpoint is not ready: {args.qwen_url}: {health}")
+                LOGGER.info("Using persistent Qwen3-VL service at %s", args.qwen_url)
+                agent = QwenHTTPAgent(args.qwen_url, args.qwen_timeout)
+                qwen_service = {
+                    key: health.get(key) for key in (
+                        "model", "physical_gpu", "dtype", "min_pixels",
+                        "max_pixels", "max_new_tokens",
+                    )
+                }
+                qwen_identity = json.dumps(qwen_service, sort_keys=True)
+            else:
+                agent = QwenAgent(
+                    args.qwen_model, args.qwen_device, args.qwen_dtype, args.qwen_max_new_tokens,
+                    args.qwen_min_pixels, args.qwen_max_pixels,
+                )
         plans = build_plans(media_items, categories, args, agent, work_dir)
-        frames = prepare_frames(media_items, plans, output, args)
+        frames = prepare_frames(media_items, plans, categories, output, args)
         if not frames:
             raise RuntimeError("Planning produced no frames")
         LOGGER.info("Prepared %d frames", len(frames))
@@ -671,7 +731,11 @@ def main() -> int:
         signature = annotation_signature(categories, urls, args)
         sam_progress_path = work_dir / "sam_progress.jsonl"
         records_by_path = load_sam_progress(sam_progress_path, signature) if args.resume else {}
-        pending = [frame for frame in frames if str(frame.path) not in records_by_path]
+        pending = [
+            frame for frame in frames
+            if str(frame.path) not in records_by_path
+            or tuple(records_by_path[str(frame.path)].get("planned_categories", ())) != frame.categories
+        ]
         progress_file = sam_progress_path.open("a" if args.resume else "w", encoding="utf-8")
         failed_records: list[dict[str, Any]] = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
@@ -688,6 +752,7 @@ def main() -> int:
                         "source_key": frame.source_key, "source_path": frame.source_path,
                         "media_type": frame.media_type, "frame_index": frame.frame_index,
                         "timestamp": frame.timestamp, "image_path": str(frame.path),
+                        "planned_categories": list(frame.categories),
                         "width": 0, "height": 0, "annotations": [], "errors": [str(error)],
                     }
                     failed_records.append(record)
@@ -709,7 +774,7 @@ def main() -> int:
             assert agent is not None
             qwen_review_records(
                 records, categories, agent, work_dir,
-                model_name=str(args.qwen_model), resume=args.resume,
+                model_name=qwen_identity, resume=args.resume,
             )
         quality_counts = quality_gate(
             records, accept_score=args.accept_score, review_score=args.review_score,
@@ -723,6 +788,7 @@ def main() -> int:
         manifest = {
             "pipeline": "EVT-Label", "version": "1.0", "input": str(args.input.resolve()),
             "planner": args.planner, "qwen_model": args.qwen_model,
+            "qwen_url": args.qwen_url, "qwen_service": qwen_service,
             "qwen_review": args.qwen_review, "sam_urls": urls,
             "categories": [asdict(item) for item in categories], "media": len(media_items),
             "frames_processed": len(records), "quality": quality_counts,

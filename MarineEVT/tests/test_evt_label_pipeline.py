@@ -17,6 +17,44 @@ SPEC.loader.exec_module(PIPELINE)
 
 
 class PipelineIntegrationTests(unittest.TestCase):
+    def test_sam_receives_only_vlm_planned_categories(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow is not installed")
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "frame.jpg"
+            Image.new("RGB", (64, 48), "navy").save(image_path)
+            frame = PIPELINE.FrameItem(
+                "video.mp4", "video.mp4", "video", 10, 1.0,
+                image_path, ("fish",),
+            )
+            categories = [
+                PIPELINE.Category(1, "fish", ("fish", "small fish")),
+                PIPELINE.Category(2, "crab", ("crab",)),
+            ]
+            args = argparse.Namespace(
+                request_timeout=10.0, min_score=0.25, include_masks=True,
+                cluster_iou=0.55, nms_iou=0.75, min_box_size=6.0,
+                min_area_ratio=0.0001, max_area_ratio=0.9,
+            )
+
+            def fake_http(url, payload, timeout):
+                self.assertEqual(
+                    payload["prompts"],
+                    [
+                        {"category_id": 1, "text": "fish"},
+                        {"category_id": 1, "text": "small fish"},
+                    ],
+                )
+                return {"result": {"detections": []}}
+
+            with mock.patch.object(PIPELINE, "http_json", side_effect=fake_http):
+                record = PIPELINE.annotate_one(
+                    frame, categories, "http://fake/v1/detect", args
+                )
+            self.assertEqual(record["planned_categories"], ["fish"])
+
     def test_image_to_quality_gated_coco(self):
         try:
             from PIL import Image
