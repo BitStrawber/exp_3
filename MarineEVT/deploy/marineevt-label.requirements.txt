@@ -2,7 +2,10 @@ fastapi>=0.115,<1
 uvicorn[standard]>=0.34,<1
 pydantic>=2.10,<3
 pillow>=11,<13
-opencv-python-headless>=4.10,<5
+# SAM3 0.1.0 pins NumPy 1.26. Keep OpenCV below 4.12 because newer
+# Python 3.9+ wheels require NumPy 2 and make the environment inconsistent.
+numpy==1.26.0
+opencv-python-headless>=4.10,<4.12
 pycocotools>=2.0.8,<3
 huggingface-hub>=0.30,<2
 tqdm>=4.66,<5

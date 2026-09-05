@@ -18,6 +18,16 @@ conda activate marineevt-label
 python -m pip install -r deploy/marineevt-label.requirements.txt
 ```
 
+如果此前安装过程把 NumPy 升级到了 2.x，先修复成与 SAM3 兼容的版本，再检查依赖：
+
+```bash
+python -m pip install --upgrade --force-reinstall \
+  "numpy==1.26.0" \
+  "opencv-python-headless>=4.10,<4.12"
+
+python -m pip check
+```
+
 如果环境还没有创建，并且大盘路径是 `~/xcx`：
 
 ```bash
