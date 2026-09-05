@@ -31,6 +31,7 @@ dependencies = [
     "ftfy==6.1.1",
     "regex",
     "iopath>=0.1.10",
+    "einops>=0.8",
     "typing_extensions",
     "huggingface_hub",
 ]
