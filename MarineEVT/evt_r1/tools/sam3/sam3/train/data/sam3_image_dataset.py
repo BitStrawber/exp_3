@@ -15,7 +15,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import torch
 import torch.utils.data
 import torchvision
-from decord import cpu, VideoReader
 from iopath.common.file_io import g_pathmgr
 
 from PIL import Image as PILImage
@@ -202,6 +201,16 @@ class CustomCocoDetectionAPI(VisionDataset):
             try:
                 if ".mp4" in path and path[-4:] == ".mp4":
                     # Going to load a video frame
+                    try:
+                        from decord import cpu, VideoReader
+                    except ImportError as error:
+                        raise RuntimeError(
+                            "Reading MP4-backed SAM3 training datasets requires the "
+                            "optional 'decord' package. It is not required for the "
+                            "MarineEVT image-inference service. Install decord on a "
+                            "supported Python platform or extract the video frames "
+                            "before training."
+                        ) from error
                     video_path, frame = path.split("@")
                     video = VideoReader(video_path, ctx=cpu(0))
                     # Convert to PIL image

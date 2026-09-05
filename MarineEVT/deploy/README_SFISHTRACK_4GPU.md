@@ -32,7 +32,7 @@ python -m pip check
 若使用过早期版本创建环境，请确认 SAM3 推理所需的 `einops` 已安装：
 
 ```bash
-python -m pip install "einops>=0.8,<1" "decord==0.6.0"
+python -m pip install "einops>=0.8,<1"
 ```
 
 如果环境还没有创建，并且大盘路径是 `~/xcx`：
