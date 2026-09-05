@@ -21,6 +21,7 @@ CUDA_VISIBLE_DEVICES=4 python scripts/generate_evt_label_dataset.py \
     --output "$OUTPUT" \
     --categories-file scripts/evt_label_categories.sfishtrack.json \
     --planner qwen \
+    --allow-planner-fallback \
     --qwen-review \
     --require-vlm-accept \
     --qwen-model "$QWEN_MODEL" \

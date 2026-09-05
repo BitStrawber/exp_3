@@ -136,6 +136,7 @@ bash scripts/run_evt_label_sfishtrack_4gpu.sh \
 - 最多40个待标注帧；
 - 单类别 `fish`；
 - Qwen时间段规划和候选框复核；
+- Qwen时间规划输出格式异常时自动回退到规则抽帧，但候选框复核仍保持严格；
 - SAM3检测框和实例掩码；
 - 严格质量门控，只把 `ACCEPT` 标注写入训练集。
 
