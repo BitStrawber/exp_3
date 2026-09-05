@@ -4,8 +4,9 @@
 SAM3 Worker。默认从一段 SFISHTRACK 视频中最多处理 40 帧，输出 COCO 检测框和
 实例分割伪标签，适合先验证数据生成能力，不代表完整数据集性能。
 
-SFISHTRACK 官方以约 20 GB 的单个 Google Drive 归档发布。下载脚本支持断点续传，
-并只从归档中解压一段视频、对应 COCO 标注和元数据，以减少解压后的空间占用。
+SFISHTRACK 官方归档实际为 27,487,705,333 字节（约 25.6 GiB）。下载脚本优先从
+官方 Zenodo 记录断点下载，自动校验文件大小和 MD5；Google Drive 作为备用源。
+脚本只从归档中解压一段视频、对应 COCO 标注和元数据，以减少解压后的空间占用。
 
 ## 1. 更新代码与环境
 
@@ -85,7 +86,8 @@ watch -n 5 bash scripts/check_sam3_workers.sh
 
 ## 3. 下载并只准备一个视频
 
-先确认下载盘至少有约 25 GB 可用空间：
+先确认下载盘至少有约 30 GB 可用空间；如果 Qwen 权重也放在同一磁盘，建议至少
+保留 50 GB：
 
 ```bash
 df -h ~/xcx
@@ -99,7 +101,8 @@ conda activate marineevt-label
 bash scripts/download_sfishtrack_one.sh "$HOME/xcx/data/sfishtrack_smoke"
 ```
 
-下载中断后重复同一条命令即可续传。要指定视频名，可传第二个参数：
+下载中断后重复同一条命令即可从 Zenodo 续传。完成后脚本会检查归档大小和
+`MD5=9ec025a052104729b9d83df18db9e58b`。要指定视频名，可传第二个参数：
 
 ```bash
 bash scripts/download_sfishtrack_one.sh \
