@@ -142,6 +142,16 @@ pip install -r requirements.txt
 
 ## 💻 Usage
 
+### EVT-Label: generate COCO datasets with Qwen3-VL + SAM3
+
+This fork includes an inference-only, event-centric pseudo-label pipeline. It uses a base
+Qwen3-VL model for optional temporal planning and candidate review, SAM3 for boxes/masks,
+and quality gating before COCO export. It does not require the unpublished EVT-R1 checkpoint.
+
+See [deploy/README_EVT_LABEL.md](deploy/README_EVT_LABEL.md) for the general workflow, or
+[deploy/README_SFISHTRACK_4GPU.md](deploy/README_SFISHTRACK_4GPU.md) for a reproducible
+one-video SFISHTRACK smoke test using physical GPUs 4, 5, 6 and 7.
+
 ### Inference with EVT-R1
 
 ```bash

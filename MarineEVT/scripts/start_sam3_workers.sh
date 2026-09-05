@@ -17,6 +17,7 @@ source "$CONFIG_FILE"
 : "${SAM3_ALLOWED_DATA_ROOT:?SAM3_ALLOWED_DATA_ROOT is required}"
 
 SAM3_NUM_GPUS="${SAM3_NUM_GPUS:-8}"
+SAM3_GPU_IDS="${SAM3_GPU_IDS:-}"
 SAM3_BASE_PORT="${SAM3_BASE_PORT:-8111}"
 SAM3_BIND_HOST="${SAM3_BIND_HOST:-127.0.0.1}"
 LOG_ROOT="${LOG_ROOT:-${HOME}/xcx/logs}"
@@ -32,16 +33,29 @@ if [[ ! -f "$SAM3_BPE_PATH" ]]; then
 fi
 
 available_gpus="$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)"
-if (( available_gpus < SAM3_NUM_GPUS )); then
-    echo "Requested $SAM3_NUM_GPUS GPUs, but nvidia-smi reports $available_gpus." >&2
+if [[ -n "$SAM3_GPU_IDS" ]]; then
+    IFS=',' read -r -a gpu_ids <<< "$SAM3_GPU_IDS"
+else
+    gpu_ids=()
+    for ((gpu=0; gpu<SAM3_NUM_GPUS; gpu++)); do gpu_ids+=("$gpu"); done
+fi
+if (( ${#gpu_ids[@]} == 0 )); then
+    echo "SAM3_GPU_IDS selected no GPUs." >&2
     exit 1
 fi
+for gpu in "${gpu_ids[@]}"; do
+    if [[ ! "$gpu" =~ ^[0-9]+$ ]] || (( gpu >= available_gpus )); then
+        echo "Invalid physical GPU id '$gpu'; nvidia-smi reports $available_gpus GPU(s)." >&2
+        exit 1
+    fi
+done
 
 mkdir -p "$LOG_ROOT/sam3" "$RUN_ROOT/sam3" "$SAM3_ALLOWED_DATA_ROOT"
 cd "$PROJECT_ROOT"
 
-for ((gpu=0; gpu<SAM3_NUM_GPUS; gpu++)); do
-    port=$((SAM3_BASE_PORT + gpu))
+for slot in "${!gpu_ids[@]}"; do
+    gpu="${gpu_ids[$slot]}"
+    port=$((SAM3_BASE_PORT + slot))
     pid_file="$RUN_ROOT/sam3/gpu_${gpu}.pid"
     if [[ -f "$pid_file" ]]; then
         old_pid="$(cat "$pid_file")"

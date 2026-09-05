@@ -1,0 +1,16 @@
+{
+  "categories": [
+    {
+      "id": 1,
+      "name": "fish",
+      "supercategory": "marine animal",
+      "prompts": [
+        "fish",
+        "an individual fish underwater",
+        "a clearly visible swimming fish",
+        "a small fish underwater"
+      ],
+      "min_score": 0.25
+    }
+  ]
+}

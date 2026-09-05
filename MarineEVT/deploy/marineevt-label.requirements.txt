@@ -6,3 +6,7 @@ opencv-python-headless>=4.10,<5
 pycocotools>=2.0.8,<3
 huggingface-hub>=0.30,<2
 tqdm>=4.66,<5
+transformers>=4.57,<6
+accelerate>=1.4,<2
+qwen-vl-utils>=0.0.14,<1
+gdown>=5.2,<6

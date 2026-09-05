@@ -10,12 +10,21 @@ fi
 source "$CONFIG_FILE"
 
 SAM3_NUM_GPUS="${SAM3_NUM_GPUS:-8}"
+SAM3_GPU_IDS="${SAM3_GPU_IDS:-}"
 SAM3_BASE_PORT="${SAM3_BASE_PORT:-8111}"
 SAM3_BIND_HOST="${SAM3_BIND_HOST:-127.0.0.1}"
 failed=0
 
-for ((gpu=0; gpu<SAM3_NUM_GPUS; gpu++)); do
-    port=$((SAM3_BASE_PORT + gpu))
+if [[ -n "$SAM3_GPU_IDS" ]]; then
+    IFS=',' read -r -a gpu_ids <<< "$SAM3_GPU_IDS"
+else
+    gpu_ids=()
+    for ((gpu=0; gpu<SAM3_NUM_GPUS; gpu++)); do gpu_ids+=("$gpu"); done
+fi
+
+for slot in "${!gpu_ids[@]}"; do
+    gpu="${gpu_ids[$slot]}"
+    port=$((SAM3_BASE_PORT + slot))
     if response="$(curl --fail --silent --show-error --max-time 10 "http://${SAM3_BIND_HOST}:${port}/health")"; then
         echo "GPU $gpu port $port READY $response"
     else

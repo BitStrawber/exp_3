@@ -1,0 +1,15 @@
+{
+  "categories": [
+    {
+      "id": 1,
+      "name": "fish",
+      "supercategory": "marine animal",
+      "prompts": [
+        "an individual fish underwater",
+        "the full visible body of a fish underwater",
+        "a live fish in its natural underwater habitat"
+      ],
+      "min_score": 0.35
+    }
+  ]
+}
